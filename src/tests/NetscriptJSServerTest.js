@@ -25,11 +25,16 @@ async function runTest() {
 
     // If we delete the script, reimporting module 2 will not work.
     s.delScript("foo", "s1.js");
+    var didntCatch = false;
     try {
         const module2_2 = await s.importScript("foo", "s2.js");
+        didntCatch = true;
     } catch (error) {
         console.info("got expected err:", error);
     }
+
+    if (didntCatch) throw new Error("expected an error when deleting script!");
+
 
     // Calling run on the original module should still work. (Shouldn't matter for us, but just verifying assumptions.)
     module.run(o);
