@@ -89,7 +89,7 @@ export class ScriptStore {
         // by placing it inside an eval call.
         try {
             const loadedModule = await eval('import(stack[stack.length - 1])');
-            return await loadedModule.run();    
+            return await loadedModule.run();
         } finally {
             // Revoke the generated URLs and unregister the environment.
             for (const url in stack) URL.revokeObjectURL(url);
