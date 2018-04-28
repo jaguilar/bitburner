@@ -32,6 +32,8 @@
 // request is sent for the corresponding resource. The script is
 // removed from the dictionary.
 
+import {registerEnv, unregisterEnv, makeEnvHeader} from "./NSJSEnvLoader.js";
+
 export function makeScriptBlob(code) {
     return new Blob([code], {type: "text/javascript"});
 }
@@ -66,46 +68,43 @@ export class ScriptStore {
         delete server[filename];
     }
 
-    // The script as stored here is unusable, because it
-    // refers to other modules by their "js" name. E.g.
-    // it might refer to a hacking script as "hack.js".
-    // This does not work because there is no such script!
-    // What we're going to do is iterate over the scripts and
-    // recursively replace all these imports with blob urls.
-    // Note that this only applies to scripts on the server.
-    // We'll also allow users to import from "./netscript.js".
-    // Everything else will result in an error.
-    async importScript(address, filename) {
+    // Translate the script, loading all the dependencies and getting it
+    // ready to execute. Once it's loaded, call run() on the script.
+    // Then clean up. Returns the return value of run.
+    async executeScript(address, filename, env) {
+        env = env || {};
+        const envUuid = registerEnv(env);
+        const envHeader = makeEnvHeader(envUuid);
+
         filename = filename.toLowerCase();
         // Get the blob url for this file.
-        const stack = this._getScriptUrls(address, filename, []);
+        const stack = this._getScriptUrls(address, filename, envHeader, []);
 
+        // The URL at the top is the one we want to import. It will
+        // recursively import all the other modules in the stack.
+        //
+        // Webpack likes to turn the import into a require, which sort of
+        // but not really behaves like import. Particularly, it cannot
+        // load fully dynamic content. So we hide the import from webpack
+        // by placing it inside an eval call.
         try {
-            // The URL at the top is the one we want to import. It will
-            // recursively import all the other modules in the stack.
-            return import(stack[stack.length - 1]);
+            const loadedModule = await eval('import(stack[stack.length - 1])');
+            return await loadedModule.run();    
         } finally {
-            // Revoke the generated URLs, now that we no longer need
-            // them. There's no easy system for reusing these,
-            // since any of the files in the stack might change
-            // before the next time the script runs.
-            // In the future, maybe we'll remember the set of 
-            // scripts that contributed to the parsing of a given
-            // module and only invalidate them if one changes.
+            // Revoke the generated URLs and unregister the environment.
             for (const url in stack) URL.revokeObjectURL(url);
-        }
+            unregisterEnv(envUuid);
+        };
     }
-
-    
 
     // Gets a stack of blob urls, the top-most element being
     // the blob url for the named script on the named server.
-    _getScriptUrls(address, filename, alreadySeen) {
+    _getScriptUrls(address, filename, envHeader, alreadySeen) {
         const code = ((this.servers[address] || {})[filename] || {})["code"] || null;
         if (code == null) throw new Error(filename + " does not exist on " + address);
 
         // From: https://stackoverflow.com/a/43834063/91401 
-        var stack = [];
+        const urlStack = [];
         try {
             const transformedCode = code.replace(/((?:from|import)\s+(?:'|"))([^'"]+)('|";)/g,
                 (unmodified, prefix, filename, suffix) => {
@@ -117,21 +116,27 @@ export class ScriptStore {
                     // Try to get a URL for the requested script. Not case sensitive.
                     const lowerFilename = filename.toLowerCase();
                     alreadySeen.push(lowerFilename);
-                    const urls = this._getScriptUrls(address, lowerFilename, alreadySeen);
+                    const urls = this._getScriptUrls(address, lowerFilename, envHeader, alreadySeen);
                     alreadySeen.pop();
 
                     // The top url in the stack is the replacement address for this
                     // script.
-                    stack.push(...urls);
+                    urlStack.push(...urls);
                     return [prefix, urls[urls.length - 1], suffix].join('');
                 });
             
+            // Inject the NSJS environment at the top of the code.
+            const transformedCodeWithHeader = envHeader + transformedCode;
+            console.info(transformedCodeWithHeader);
+
             // If we successfully transformed the code, create a blob url for it and
             // push that URL onto the top of the stack.
-            stack.push(URL.createObjectURL(makeScriptBlob(transformedCode)));
-            return stack;
-        } finally {
-            for (const url in stack) URL.revokeObjectURL(url);
+            urlStack.push(URL.createObjectURL(makeScriptBlob(transformedCodeWithHeader)));
+            return urlStack;
+        } catch (err) {
+            // If there is an error, we need to clean up the URLs.
+            for (const url in urlStack) URL.revokeObjectURL(url);
+            throw err;
         }
     }
 }
