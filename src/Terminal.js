@@ -1210,7 +1210,7 @@ let Terminal = {
                     var text = createFconf();
                     Engine.loadScriptEditorContent(filename, text);
                     return;
-                } else if (filename.endsWith(".script")) {
+                } else if (filename.endsWith(".script") || filename.endsWith(".js")) {
                     for (var i = 0; i < s.scripts.length; i++) {
     					if (filename == s.scripts[i].filename) {
     						Engine.loadScriptEditorContent(filename, s.scripts[i].code);
@@ -1257,7 +1257,7 @@ let Terminal = {
                            return;
                         }
                     }
-                } else if (delTarget.endsWith(".script")) {
+                } else if (delTarget.endsWith(".script") || delTarget.endWith(".js")) {
                     for (var i = 0; i < s.scripts.length; ++i) {
                         if (s.scripts[i].filename == delTarget) {
                             //Check that the script isnt currently running
@@ -1303,7 +1303,8 @@ let Terminal = {
                     }
 
 					//Check if its a script or just a program/executable
-					if (executableName.indexOf(".script") == -1) {
+                    if (executableName.indexOf(".script") == -1 &&
+                        executableName.indexOf(".js") == -1) {
 						//Not a script
 						Terminal.runProgram(executableName);
 					} else {
@@ -1361,7 +1362,7 @@ let Terminal = {
                     return;
                 }
                 var scriptname = args[0];
-                if (!scriptname.endsWith(".lit") && !scriptname.endsWith(".script") &&
+                if (!scriptname.endsWith(".lit") && !scriptname.endsWith(".script") && !scriptname.endsWith(".js") &&
                     !scriptname.endsWith(".txt")){
                     post("Error: scp only works for .script, .txt, and .lit files");
                     return;
@@ -1480,7 +1481,7 @@ let Terminal = {
                     }
 
                     //Can only tail script files
-                    if (scriptName.endsWith(".script") == false) {
+                    if ((scriptName.endsWith(".script") || scriptName.endsWith(".js"))  == false) {
                         post("Error: tail can only be called on .script files (filename must end with .script)"); return;
                     }
 

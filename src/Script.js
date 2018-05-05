@@ -29,6 +29,7 @@ import {post}                                   from "./Terminal.js";
 import {TextFile}                               from "./TextFile.js";
 
 import {parse, Node}                            from "../utils/acorn.js";
+const walk = require("acorn/dist/walk");
 import {dialogBoxCreate}                        from "../utils/DialogBox.js";
 import {Reviver, Generic_toJSON,
         Generic_fromJSON}                       from "../utils/JSONReviver.js";
@@ -209,7 +210,7 @@ function scriptEditorInit() {
 //Updates RAM usage in script
 function updateScriptEditorContent() {
     var filename = document.getElementById("script-editor-filename").value;
-    if (scriptEditorRamCheck == null || !scriptEditorRamCheck.checked || !filename.endsWith(".script")) {
+    if (scriptEditorRamCheck == null || !scriptEditorRamCheck.checked || (!filename.endsWith(".script") && !filename.endsWith(".js"))) {
         scriptEditorRamText.innerText = "N/A";
         return;
     }
@@ -270,7 +271,7 @@ function saveAndCloseScriptEditor() {
             dialogBoxCreate("Invalid .fconf file");
             return;
         }
-    } else if (filename.endsWith(".script")) {
+    } else if (filename.endsWith(".script") || filename.endsWith(".js")) {
         //If the current script already exists on the server, overwrite it
         for (var i = 0; i < s.scripts.length; i++) {
             if (filename == s.scripts[i].filename) {
@@ -348,6 +349,193 @@ Script.prototype.updateRamUsage = function() {
     }
 }
 
+// If you name an identifier one of these special strings, I guess you pay extra? :(
+const specialReferenceIF = "__SPECIAL_referenceIf";
+const specialReferenceFOR = "__SPECIAL_referenceFor";
+const specialReferenceWHILE = "__SPECIAL_referenceWhile";
+const memCheckGlobalKey = ".__GLOBAL__";
+
+// Calcluates the amount of RAM a script uses, given only the code and the server it's on.
+function parseOnlyRamCalculate(server, code, workerScript) {
+    console.info(code);
+    try {
+        // "module.identifier" => [identifiers_referenced]
+        // identifiers_referenced may include "module.*", in which case all costs from the
+        // given module must be included in the final tally. They may also be one of the
+        // special reference above, or a built-in function.
+        let referenceMap = {};
+        const completedParses = new Set();
+        const parseQueue = [];
+
+        // Parses a chunk of code with a given module name, and updates parseQueue and referenceMap.
+        function parseCode(code, moduleName) {
+            const result = parseOnlyRamCalculateOneScript(code, moduleName);
+            completedParses.add(moduleName);
+
+            // Add any additional modules to the parse queue;
+            for (let i = 0; i < result.additionalModules.length; ++i) {
+                if (!completedParses.has(result.additionalModules[i])) {
+                    parseQueue.push(result.additionalModules[i]);
+                }
+            }
+
+            // Splice all the references in.
+            referenceMap = {...referenceMap, ...result.referenceMap};
+        }
+
+        const initialModule = "__SPECIAL_INITIAL_MODULE__";
+        parseCode(code, initialModule);
+
+        while (parseQueue.length > 0) {
+            // Get the code from the server. Not sure why we always take copies, but let's do that here too.
+            const nextModule = parseQueue.shift();
+
+            const script = server.getScript(nextModule + ".js");
+            if (!script) return -1;
+
+            const codeCopy = script.code.repeat(1);
+            parseCode(codeCopy, nextModule);
+        }
+
+        // Finally, walk the reference map and generate a ram cost. The initial set of keys to scan
+        // are those that start with __SPECIAL_INITIAL_MODULE__.
+        let ram = 1.4;
+        const unresolvedRefs = Object.keys(referenceMap).filter(s => s.startsWith(initialModule));
+        const resolvedRefs = new Set();
+        while (unresolvedRefs.length > 0) {
+            const ref = unresolvedRefs.shift();
+            resolvedRefs.add(ref);
+
+            // Add any dependencies that haven't already been handled.
+            for (let dep of referenceMap[ref] || []) {
+                if (!resolvedRefs.has(dep)) unresolvedRefs.push(dep);
+            }
+
+            // Check if this is one of the special keys, and add the appropriate ram cost if so.
+            if (ref == specialReferenceIF) ram += CONSTANTS.ScriptIfRamCost;
+            if (ref == specialReferenceFOR) ram += CONSTANTS.ScriptForRamCost;
+            if (ref == specialReferenceWHILE) ram += CONSTANTS.ScriptWhileRamCost;
+            if (ref == "hacknetnodes") ram += CONSTANTS.ScriptHacknetNodesRamCost;
+
+            // Check if this is a function in the workerscript env. If it is, then we need to call
+            // the function, and it will report its ram cost.
+            try {
+                var func = workerScript.env.get(ref);
+                if (typeof func === "function") {
+                    try {
+                        var res = func.apply(null, []);
+                        if (typeof res === "number") {
+                            ram += res;
+                        }
+                    } catch(e) {
+                        console.log("ERROR applying function: " + e);
+                    }
+                }
+            } catch (error) { continue; }
+
+        }
+        return ram;
+
+    } catch (error) {
+        console.info("parse or eval error: ", error);
+        // This is not unexpected.
+        return -1;
+    }
+}
+
+// Parses one script and calculates its ram usage. For the global scope and each function.
+// Returns a cost map and a referenceMap for the module. Returns a reference map to be joined
+// onto the main reference map, and a list of modules that need to be parsed.
+function parseOnlyRamCalculateOneScript(code, currentModule) {
+    const ast = parse(code, {sourceType:"module", ecmaVersion: 8});
+
+    // Everything from the global scope goes in ".". Everything else goes in ".function", where only
+    // the outermost layer of functions counts.
+    const globalKey = currentModule + memCheckGlobalKey;
+    const referenceMap = {};
+    referenceMap[globalKey] = new Set();
+
+    // If we reference this internal name, we're really referencing that external name.
+    let internalToExternal = {};
+
+    var additionalModules = [];
+
+    // References get added pessimistically. They are added for thisModule.name, name, and for
+    // any aliases.
+    function addRef(key, name) {
+        const s = referenceMap[key] || (referenceMap[key] = new Set());
+        if (name in internalToExternal) {
+            s.add(internalToExternal[name]);
+        }
+        s.add(currentModule + "." + name);
+        s.add(name);  // For builtins like hack.
+    }
+
+    // key is the key identifiers should be added as dependencies of.
+    // walk is a walk function, for doing recursive walks of expressions in composites
+    // like while, if, etc.
+    function commonVisitors() {
+        return {
+            Identifier: (node, st, walkDeeper) => {
+                addRef(st.key, node.name);
+            },
+            WhileStatement: (node, st, walkDeeper) => {
+                addRef(st.key, specialReferenceWHILE);
+                node.test && walkDeeper(node.test, st);
+                node.body && walkDeeper(node.body, st);
+            },
+            DoWhileStatement: (node, st, walkDeeper) => {
+                addRef(st.key, specialReferenceWHILE);
+                node.test && walkDeeper(node.test, st);
+                node.body && walkDeeper(node.body, st);
+            },
+            ForStatement: (node, st, walkDeeper) => {
+                addRef(st.key, specialReferenceFOR);
+                node.init && walkDeeper(node.init, st);
+                node.test && walkDeeper(node.test, st);
+                node.update && walkDeeper(node.update, st);
+                node.body && walkDeeper(node.body, st);
+            },
+            IfStatement: (node, st, walkDeeper) => {
+                addRef(st.key, specialReferenceIF);
+                node.test && walkDeeper(node.test, st);
+                node.consequent && walkDeeper(node.consequent, st);
+                node.alternate && walkDeeper(node.alternate, st);
+            },
+        }
+    }
+
+    walk.recursive(ast, {key: globalKey}, {
+        ImportDeclaration: (node, st, walkDeeper) => {
+            const importModuleName = node.source.value.replace(/['"]/g, "").replace(/\.js/, "");
+            additionalModules.push(importModuleName);
+
+            // This module's global scope refers to that module's global scope, no matter how we
+            // import it.
+            referenceMap[st.key].add(importModuleName + memCheckGlobalKey);
+
+            for (let i = 0; i < node.specifiers.length; ++i) {
+                const spec = node.specifiers[i];
+                if (spec.imported !== undefined && spec.local !== undefined) {
+                    // We depend on specific things.
+                    internalToExternal[spec.local.name] = importModuleName + "." + spec.imported.name;
+                } else {
+                    // We depend on everything.
+                    referenceMap[st.key].add(importModuleName + ".*");
+                }
+            }
+        },
+        FunctionDeclaration: (node, st, walkDeeper) => {
+            // Don't use walkDeeper, because we are changing the visitor set.
+            const key = currentModule + "." + node.id.name;
+            walk.recursive(node, {key: key}, commonVisitors());
+        },
+        ...commonVisitors()
+    });
+
+    return {referenceMap: referenceMap, additionalModules: additionalModules};
+}
+
 function calculateRamUsage(codeCopy) {
     //Create a temporary/mock WorkerScript and an AST from the code
     var currServ = Player.getCurrentServer();
@@ -359,11 +547,18 @@ function calculateRamUsage(codeCopy) {
     workerScript.checkingRam = true; //Netscript functions will return RAM usage
     workerScript.serverIp = currServ.ip;
 
+    let newRam = -1;
+    try {
+		newRam = parseOnlyRamCalculate(currServ, codeCopy, workerScript);
+	} catch (e) {
+	}
+
     try {
         var ast = parse(codeCopy, {sourceType:"module"});
     } catch(e) {
-        return -1;
+        return newRam;  // If the new parser managed to parse it,use that instead.
     }
+
 
     //Search through AST, scanning for any 'Identifier' nodes for functions, or While/For/If nodes
     var queue = [], ramUsage = 1.4;
@@ -439,6 +634,13 @@ function calculateRamUsage(codeCopy) {
         ramUsage += CONSTANTS.ScriptHacknetNodesRamCost;
     }
     return ramUsage;
+}
+
+// Returns
+function parseScriptRam(ast, functionFilter, scriptNameStack) {
+
+
+
 }
 
 Script.prototype.download = function() {

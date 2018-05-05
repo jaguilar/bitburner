@@ -4,8 +4,9 @@ import {addActiveScriptsItem,
 import {CONSTANTS}                          from "./Constants.js";
 import {Engine}                             from "./engine.js";
 import {Environment}                        from "./NetscriptEnvironment.js";
-import {evaluate, isScriptErrorMessage,
+import {evaluate, isScriptErrorMessage, makeRuntimeRejectMsg,
         killNetscriptDelay}                 from "./NetscriptEvaluator.js";
+import {evaluateJSScript, executeJSScript}                   from "./NetscriptJSEvaluator.js";
 import {NetscriptPort}                      from "./NetscriptPort.js";
 import {AllServers}                         from "./Server.js";
 import {Settings}                           from "./Settings.js";
@@ -87,18 +88,76 @@ function runScriptsLoop() {
 	for (var i = 0; i < workerScripts.length; i++) {
 		//If it isn't running, start the script
 		if (workerScripts[i].running == false && workerScripts[i].env.stopFlag == false) {
-			try {
-				var ast = parse(workerScripts[i].code, {sourceType:"module"});
-                //console.log(ast);
-			} catch (e) {
-                console.log("Error parsing script: " + workerScripts[i].name);
-                dialogBoxCreate("Syntax ERROR in " + workerScripts[i].name + ":<br>" +  e);
-                workerScripts[i].env.stopFlag = true;
-				continue;
-			}
+            let p = null;  // The script's promise.
 
-			workerScripts[i].running = true;
-			var p = evaluate(ast, workerScripts[i]);
+            if (workerScripts[i].name.endsWith(".js")) {
+                let w = workerScripts[i];
+                w.running = true;
+
+                // We need to go through the environment and wrap each function in such a way that it
+                // can be called at most once at a time. This will prevent situations where multiple
+                // hack promises are outstanding, for example.
+                function wrap(propName, f) {
+                    let running = null;  // The name of the currently running netscript function.
+                    // This function unfortunately cannot be an async function, because we don't
+                    // know if the original one was, and there's no way to tell.
+                    return function (...args) {
+                        const msg = "Concurrent calls to Netscript functions not allowed! " +
+                                    "Did you forget to await hack(), grow(), or some other " +
+                                    "promise-returning function? (Currently running: %s tried to run: %s)"
+                        if (running) {
+                            w.errorMessage = makeRuntimeRejectMsg(w, sprintf(msg, running, propName), null)
+                            throw w;
+                        }
+                        running = propName;
+                        let result = f(...args);
+                        if (result && result.finally !== undefined) {
+                            return result.finally(function () {
+                                running = null;
+                            });
+                        } else {
+                            running = null;
+                            return result;
+                        }
+                    }
+                };
+                for (let prop in w.env.vars) {
+                    if (typeof w.env.vars[prop] !== "function") continue;
+                    if (prop === "sleep") continue;  // OK for multiple simultaneous calls to sleep.
+                    w.env.vars[prop] = wrap(prop, w.env.vars[prop]);
+                }
+
+                // Note: the environment that we pass to the JS script only needs to contain the functions visible
+                // to that script, which env.vars does at this point.
+                p = executeJSScript(workerScripts[i].scriptRef.scriptRef,
+                                    workerScripts[i].getServer().scripts,
+                                    workerScripts[i].env.vars).then(function (mainReturnValue) {
+                    if (mainReturnValue === undefined) return w;
+                    return [mainReturnValue, w];
+                }).catch(e => {
+                    if (e instanceof Error) {
+                        w.errorMessage = makeRuntimeRejectMsg(w, e.message + (e.stack && ("\nstack:\n" + e.stack.toString()) || ""));
+                        throw w;
+                    } else if (isScriptErrorMessage(e)) {
+                        w.errorMessage = e;
+                        throw w;
+                    }
+					throw e; // Don't know what to do with it, let's rethrow.
+				});
+            } else {
+                try {
+                    var ast = parse(workerScripts[i].code, {sourceType:"module"});
+                    //console.log(ast);
+                } catch (e) {
+                    console.log("Error parsing script: " + workerScripts[i].name);
+                    dialogBoxCreate("Syntax ERROR in " + workerScripts[i].name + ":<br>" +  e);
+                    workerScripts[i].env.stopFlag = true;
+                    continue;
+                }
+                workerScripts[i].running = true;
+                p = evaluate(ast, workerScripts[i]);
+            }
+
 			//Once the code finishes (either resolved or rejected, doesnt matter), set its
 			//running status to false
 			p.then(function(w) {

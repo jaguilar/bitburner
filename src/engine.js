@@ -1,3 +1,6 @@
+require("babel-core/register");
+require("babel-polyfill");
+
 import {dialogBoxCreate}                        from "../utils/DialogBox.js";
 import {gameOptionsBoxOpen, gameOptionsBoxClose}from "../utils/GameOptions.js";
 import {clearEventListeners, createElement,

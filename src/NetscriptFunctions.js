@@ -222,6 +222,7 @@ function NetscriptFunctions(workerScript) {
                 workerScript.scriptRef.log("Sleeping for " + time + " milliseconds");
             }
             return netscriptDelay(time, workerScript).then(function() {
+                if (workerScript.env.stopFlag) {return Promise.reject(workerScript);}
                 return Promise.resolve(true);
             });
         },
@@ -735,7 +736,7 @@ function NetscriptFunctions(workerScript) {
                 });
                 return res;
             }
-            if (!scriptname.endsWith(".lit") && !scriptname.endsWith(".script") &&
+            if (!scriptname.endsWith(".lit") && !scriptname.endsWith(".script") && !scriptname.endsWith(".js") &&
                 !scriptname.endsWith("txt")) {
                 throw makeRuntimeRejectMsg(workerScript, "Error: scp() does not work with this file type. It only works for .script, .lit, and .txt files");
             }
@@ -1911,7 +1912,7 @@ function NetscriptFunctions(workerScript) {
                        return true;
                     }
                 }
-            } else if (fn.endsWith(".script")) {
+            } else if (fn.endsWith(".script") || fn.endsWith(".js")) {
                 for (var i = 0; i < s.scripts.length; ++i) {
                     if (s.scripts[i].filename === fn) {
                         //Check that the script isnt currently running
