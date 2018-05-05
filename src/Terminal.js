@@ -72,7 +72,7 @@ function postNetburnerText() {
 
 
 //Key Codes
-let KEY = {
+var KEY = {
     TAB:            9,
     ENTER:          13,
     CTRL:           17,
@@ -2026,4 +2026,4 @@ let Terminal = {
 	}
 };
 
-export {postNetburnerText, post, Terminal};
+export {postNetburnerText, post, Terminal, KEY};
