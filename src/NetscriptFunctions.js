@@ -32,7 +32,8 @@ import {Locations}                                  from "./Location.js";
 import {Message, Messages}                          from "./Message.js";
 import {inMission}                                  from "./Missions.js";
 import {Player}                                     from "./Player.js";
-import {Script, findRunningScript, RunningScript}   from "./Script.js";
+import {Script, findRunningScript, RunningScript,
+        isScriptFilename}                           from "./Script.js";
 import {Server, getServer, AddToAllServers,
         AllServers, processSingleServerGrowth,
         GetServerByHostname}                        from "./Server.js";
@@ -65,11 +66,14 @@ import {yesNoBoxClose, yesNoBoxGetYesButton,
         yesNoBoxGetNoButton, yesNoBoxCreate,
         yesNoBoxOpen}                               from "../utils/YesNoBox.js";
 
-var hasSingularitySF=false,     //Source-File 4
+var hasCorporationSF=false,     //Source-File 3
+    hasSingularitySF=false,     //Source-File 4
     hasAISF=false,              //Source-File 5
-    hasBn11SF=false,
+    hasBladeburnerSF=false,     //Source-File 6
     hasWallStreetSF=false,      //Source-File 8
-    hasCorporationSF=false;     //Source-File 3
+    hasBn11SF=false;            //Source-File 11
+
+
 
 var singularitySFLvl=1, wallStreetSFLvl=1;
 
@@ -85,6 +89,9 @@ function initSingularitySFFlags() {
         }
         if (Player.sourceFiles[i].n === 5) {
             hasAISF = true;
+        }
+        if (Player.sourceFiles[i].n === 6) {
+            hasBladeburnerSF = true;
         }
         if (Player.sourceFiles[i].n === 8) {
             hasWallStreetSF = true;
@@ -735,7 +742,7 @@ function NetscriptFunctions(workerScript) {
                 });
                 return res;
             }
-            if (!scriptname.endsWith(".lit") && !scriptname.endsWith(".script") &&
+            if (!scriptname.endsWith(".lit") && !isScriptFilename(scriptname) &&
                 !scriptname.endsWith("txt")) {
                 throw makeRuntimeRejectMsg(workerScript, "Error: scp() does not work with this file type. It only works for .script, .lit, and .txt files");
             }
@@ -1911,7 +1918,7 @@ function NetscriptFunctions(workerScript) {
                        return true;
                     }
                 }
-            } else if (fn.endsWith(".script")) {
+            } else if (isScriptFilename(fn)) {
                 for (var i = 0; i < s.scripts.length; ++i) {
                     if (s.scripts[i].filename === fn) {
                         //Check that the script isnt currently running
@@ -3562,5 +3569,5 @@ function NetscriptFunctions(workerScript) {
     }
 }
 
-export {NetscriptFunctions, initSingularitySFFlags, hasSingularitySF, hasBn11SF, hasWallStreetSF, hasCorporationSF,
-        wallStreetSFLvl};
+export {NetscriptFunctions, initSingularitySFFlags, hasSingularitySF, hasBn11SF,
+        hasWallStreetSF, wallStreetSFLvl, hasCorporationSF, hasAISF, hasBladeburnerSF};

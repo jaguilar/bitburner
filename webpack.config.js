@@ -1,6 +1,8 @@
+var path = require('path');
 var webpack = require('webpack');
 
 module.exports = {
+    mode: "development",
     plugins: [
       // http://stackoverflow.com/questions/29080148/expose-jquery-to-real-window-object-with-webpack
       new webpack.ProvidePlugin({
@@ -12,15 +14,41 @@ module.exports = {
         $: "jquery"
       }),
     ],
-
-    entry: "./src/engine.js",
+    target: "web",
+    entry: {
+        engine: "./src/engine.js",
+        tests: "./tests/index.js",
+    },
+    devtool: "nosources-source-map",
     output: {
-        path: __dirname + "/dist/",
-        filename: "bundle.js"
+        path: path.resolve(__dirname, "dist"),
+        filename: "[name].bundle.js",
+        devtoolModuleFilenameTemplate: "[id]"
     },
     module: {
-        loaders: [
-            { test: /\.css$/, loader: "style!css" },
+        rules: [
+/*            {
+                test: /\.css$/,
+                use: "style!css"
+            }*/
         ]
+    },
+    optimization: {
+        removeAvailableModules: true,
+        removeEmptyChunks: true,
+        mergeDuplicateChunks: true,
+        flagIncludedChunks: true,
+        occurrenceOrder: true,
+        sideEffects: true,
+        providedExports: false,
+        usedExports: false,
+        concatenateModules: false,
+        namedModules: false,
+        namedChunks: false,
+        minimize: false,
+        portableRecords: true
+    },
+    devServer: {
+        publicPath: "/dist",
     }
 };
