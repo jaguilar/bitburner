@@ -36,12 +36,10 @@ export function makeEnvHeader(uuid) {
     for (const prop in env) {
         envLines.push("const ", prop, " = ", "__NSJS_ENV[\"", prop, "\"];\n");
     }
-    console.info(envLines);
 
     return sprintf(`
         'use strict';
         const __NSJS_ENV = window.__NSJS__environments['%s'];
-        console.info(__NSJS_ENV);
         // The global variable assignments (hack, weaken, etc.).
         %s
     `, uuid, envLines.join(""));
