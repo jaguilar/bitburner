@@ -76,7 +76,7 @@ Server.prototype.setHackingParameters = function(requiredHackingSkill, moneyAvai
     } else {
         this.moneyAvailable = moneyAvailable * BitNodeMultipliers.ServerStartingMoney;
     }
-    this.moneyMax =
+    this.moneyMax = 25 * this.moneyAvailable * BitNodeMultipliers.ServerMaxMoney;
     this.hackDifficulty = hackDifficulty * BitNodeMultipliers.ServerStartingSecurity;
     this.baseDifficulty = hackDifficulty * BitNodeMultipliers.ServerStartingSecurity;
     this.minDifficulty = Math.max(1, Math.round(this.hackDifficulty / 3));
