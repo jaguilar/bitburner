@@ -68,7 +68,6 @@ function Server(params={ip:createRandomIp(), hostname:""}) {
     this.openPortCount        = 0;
 };
 
-/*
 //Set the hacking properties of a server
 Server.prototype.setHackingParameters = function(requiredHackingSkill, moneyAvailable, hackDifficulty, serverGrowth) {
     this.requiredHackingSkill = requiredHackingSkill;
@@ -89,7 +88,6 @@ Server.prototype.setHackingParameters = function(requiredHackingSkill, moneyAvai
 Server.prototype.setPortProperties = function(numOpenPortsReq) {
     this.numOpenPortsRequired = numOpenPortsReq;
 }
-*/
 
 Server.prototype.setMaxRam = function(ram) {
     this.maxRam = ram;
