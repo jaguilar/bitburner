@@ -2002,6 +2002,10 @@ function NetscriptFunctions(workerScript) {
             }
             return suc;
         },
+        getScriptName : function() {
+            if (workerScript.checkingRam) {return 0;}
+            return workerScript.name;
+        },
         getScriptRam : function (scriptname, ip) {
             if (workerScript.checkingRam) {
                 if (workerScript.loadedFns.getScriptRam) {
@@ -2440,7 +2444,10 @@ function NetscriptFunctions(workerScript) {
             }
             Player.loseMoney(CONSTANTS.TorRouterCost);
 
-            var darkweb = new Server(createRandomIp(), "darkweb", "", false, false, false, 1);
+            var darkweb = new Server({
+                ip:createRandomIp(), hostname:"darkweb", organizationName:"",
+                isConnectedTo:false, adminRights:false, purchasedByPlayer:false, maxRam:1
+            });
             AddToAllServers(darkweb);
             SpecialServerIps.addIp("Darkweb Server", darkweb.ip);
 
