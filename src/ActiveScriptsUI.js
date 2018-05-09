@@ -223,7 +223,9 @@ function updateActiveScriptsText(workerscript, item, itemName) {
 
     //Only update if the item is visible
     if (ActiveScriptsUI[hostname].header.classList.contains("active") === false) {return onlineMps;}
-    if (ActiveScriptsUI[hostname].scriptHdrs[itemName].classList.contains("active") === false) {return onlineMps;}
+
+    let scriptHdr = ActiveScriptsUI[hostname].scriptHdrs[itemName];
+    if (!scriptHdr || !scriptHdr.classList.contains("active")) {return onlineMps;}
 
     removeChildrenFromElement(item);
 
